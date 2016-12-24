@@ -182,12 +182,14 @@ fu_plugin_thunderbolt_add (FuPlugin *plugin, GUdevDevice *device)
 	gint rc;
 	gsize tdbid_sz = sizeof (tdbid);
 	guint16 device_id;
+	guint16 dev_model_id = 0x0000;
+	guint16 dev_vendor_id = 0x0000;
 	guint16 vendor_id;
 	guint32 version_major;
 	guint32 version_minor;
 	struct tbt_fwu_Controller *controller;
-	g_autofree gchar *guid_id = NULL;
-	g_autofree gchar *guid = NULL;
+	g_autofree gchar *guid_id1 = NULL;
+	g_autofree gchar *guid_id2 = NULL;
 	g_autofree gchar *version = NULL;
 	g_autofree gchar *id = NULL;
 	g_autoptr(AsProfile) profile = as_profile_new ();
@@ -239,12 +241,24 @@ fu_plugin_thunderbolt_add (FuPlugin *plugin, GUdevDevice *device)
 		return;
 	}
 
-	/* get the version */
+	/* get the controller info */
 	rc = tbt_fwu_Controller_getNVMVersion (controller,
 					       &version_major,
 					       &version_minor);
 	if (rc != TBT_OK) {
 		g_warning ("failed to get tbd firmware version: %s",
+			   tbt_strerror (rc));
+		return;
+	}
+	rc = tbt_fwu_Controller_getVendorID (controller, &dev_vendor_id);
+	if (rc != TBT_OK) {
+		g_warning ("failed to get tbd vendor ID: %s",
+			   tbt_strerror (rc));
+		return;
+	}
+	rc = tbt_fwu_Controller_getModelID (controller, &dev_model_id);
+	if (rc != TBT_OK) {
+		g_warning ("failed to get tbd model ID: %s",
 			   tbt_strerror (rc));
 		return;
 	}
@@ -255,10 +269,16 @@ fu_plugin_thunderbolt_add (FuPlugin *plugin, GUdevDevice *device)
 	fu_device_add_flag (dev, FWUPD_DEVICE_FLAG_ALLOW_ONLINE);
 	fu_device_set_id (dev, id);
 	fu_device_set_metadata (dev, "Thunderbolt::ID", tdbid);
-	guid_id = g_strdup_printf ("PCI\\VEN_%04X&DEV_%04X",
-				   vendor_id, device_id);
-	guid = as_utils_guid_from_string (guid_id);
-	fu_device_add_guid (dev, guid);
+
+	/* add GUID that fwupd will know about */
+	guid_id1 = g_strdup_printf ("PCI\\VEN_%04X&DEV_%04X", vendor_id, device_id);
+	fu_device_add_guid (dev, guid_id1);
+
+	/* add GUID that the tbt firmware uses */
+	guid_id2 = g_strdup_printf ("TBT-%04x%04x", dev_vendor_id, dev_model_id);
+	fu_device_add_guid (dev, guid_id2);
+
+	/* add extra properties */
 	vendor = g_udev_device_get_property (device, "ID_VENDOR_FROM_DATABASE");
 	if (vendor != NULL)
 		fu_device_set_vendor (dev, vendor);
